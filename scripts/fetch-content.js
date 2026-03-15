@@ -197,24 +197,25 @@ async function fetchYouTubeContent(podcasts, state, apiKey, isFirstRun, errors, 
   // Phase 2: Select which videos to fetch transcripts for
   let selectedVideos;
 
-  // Quick title-based AI relevance filter — skip episodes that are clearly
-  // not about AI/tech based on their title. This saves tokens by not fetching
-  // transcripts for irrelevant episodes (the agent does a deeper check later).
-  const AI_KEYWORDS = /\bai\b|artificial intelligence|llm|gpt|agent|model|machine learning|deep learning|neural|transformer|compute|gpu|rl\b|reinforcement|reasoning|training|fine.?tun|rag\b|retrieval|embed|vector|token|inference|scaling|autonomous|robot|self.?driving|computer vision|nlp\b|diffusion|generative|foundation model|frontier|benchmark|eval|prompt|context window|multimodal|open.?source|startup|founder|build|ship|product|engineer|developer|coding|code|software|api\b|platform|infra|deploy|tech/i;
-
-  const aiRelevantCandidates = allCandidates.filter(v =>
-    AI_KEYWORDS.test(v.title)
-  );
-
   if (isFirstRun) {
-    // FIRST RUN: only 1 video total (the most recent AI-relevant one)
-    // This keeps the welcome digest small and cheap on tokens
-    // Prefer AI-relevant videos, fall back to any video if none match
-    const pool = aiRelevantCandidates.length > 0 ? aiRelevantCandidates : allCandidates;
-    const sorted = pool
+    // FIRST RUN: Return candidate list with titles (no transcripts) so the
+    // agent can pick the most AI-relevant one. Saves tokens by not fetching
+    // transcripts for all 5+ videos.
+    const sorted = allCandidates
       .filter(v => v.publishedAt)
       .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-    selectedVideos = sorted.length > 0 ? [sorted[0]] : pool.slice(0, 1);
+
+    // Store candidates on the results array as a special property
+    // The main output will include these as "firstRunCandidates"
+    results.firstRunCandidates = sorted.map(v => ({
+      name: v.podcast.name,
+      title: v.title,
+      videoId: v.videoId,
+      url: `https://youtube.com/watch?v=${v.videoId}`,
+      publishedAt: v.publishedAt
+    }));
+
+    selectedVideos = [];
   } else {
     // REGULAR RUN: include all videos within the lookback window, up to 3 per channel
     const byChannel = {};
@@ -290,6 +291,38 @@ async function main() {
     ? parseInt(args[lookbackIdx + 1], 10)
     : DEFAULT_LOOKBACK_HOURS;
 
+  // --video-id flag: fetch a single transcript and output it
+  // Used by the agent after picking the most AI-relevant video from firstRunCandidates
+  const videoIdIdx = args.indexOf('--video-id');
+  if (videoIdIdx !== -1 && args[videoIdIdx + 1]) {
+    // Load env for the API key
+    if (!existsSync(USER_DIR)) await mkdir(USER_DIR, { recursive: true });
+    loadEnv({ path: ENV_PATH });
+    const apiKey = process.env.SUPADATA_API_KEY;
+    if (!apiKey) {
+      console.log(JSON.stringify({ error: 'SUPADATA_API_KEY not found' }));
+      process.exit(1);
+    }
+    const videoId = args[videoIdIdx + 1];
+    try {
+      const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      const res = await fetch(
+        `${SUPADATA_BASE}/youtube/transcript?url=${encodeURIComponent(videoUrl)}&text=true`,
+        { headers: { 'x-api-key': apiKey } }
+      );
+      if (!res.ok) {
+        console.log(JSON.stringify({ error: `HTTP ${res.status}` }));
+        process.exit(1);
+      }
+      const data = await res.json();
+      console.log(JSON.stringify({ status: 'ok', videoId, transcript: data.content || '' }));
+    } catch (err) {
+      console.log(JSON.stringify({ error: err.message }));
+      process.exit(1);
+    }
+    return;
+  }
+
   // Ensure user directory exists
   if (!existsSync(USER_DIR)) {
     await mkdir(USER_DIR, { recursive: true });
@@ -360,7 +393,11 @@ async function main() {
       status: 'ok',
       fetchedAt: new Date().toISOString(),
       lookbackHours,
+      isFirstRun,
       podcasts: podcastContent,
+      // On first run: list of candidate videos with titles (no transcripts)
+      // so the agent can pick the most AI-relevant one to fetch
+      firstRunCandidates: podcastContent.firstRunCandidates || undefined,
       // List of X accounts for the agent to search — NOT pre-fetched
       xAccountsToSearch: config.xAccounts,
       stats: {

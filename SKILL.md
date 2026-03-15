@@ -292,6 +292,21 @@ cd ${CLAUDE_SKILL_DIR}/scripts && node fetch-content.js --lookback-hours 168 2>/
 
 The script outputs a single JSON object to stdout. Parse that JSON.
 
+**FIRST RUN behavior:** On first run (`isFirstRun: true` in the JSON), the script
+returns NO podcast transcripts. Instead, it returns a `firstRunCandidates` array
+with video titles and metadata. You must:
+1. Read the `firstRunCandidates` list (titles + dates)
+2. Pick the ONE video that is most relevant to AI/technology using your judgment
+   (read the title and description — skip episodes about salary negotiation,
+   personal stories, lifestyle, etc.)
+3. Fetch its transcript by running:
+```bash
+cd ${CLAUDE_SKILL_DIR}/scripts && node fetch-content.js --video-id <videoId> 2>/dev/null
+```
+4. Use that single transcript for the welcome digest
+
+This saves tokens by only fetching 1 transcript instead of 5+.
+
 **IMPORTANT — Error Handling:**
 - The JSON will have `"status": "ok"` even if some individual sources failed.
   This is normal. Some X accounts or podcasts may temporarily fail — that's fine.
