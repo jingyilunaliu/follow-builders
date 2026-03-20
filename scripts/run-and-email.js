@@ -1,61 +1,67 @@
 /**
  * run-and-email.js
  * 放到 follow-builders/scripts/ 目录下
- * 
- * 功能：调用原有 fetch 逻辑，用 Claude API 生成中文摘要，通过 SMTP 发邮件
+ * ESM 格式（匹配 repo 的 "type": "module"）
  */
 
-const nodemailer = require('nodemailer');
+import nodemailer from 'nodemailer';
+import { execSync } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ─── 你的自定义关注列表 ───────────────────────────────────────────
 const CUSTOM_X_ACCOUNTS = [
   // 3D Gen / Spatial AI
-  { handle: 'YuanmingH',    name: '胡渊鸣 (Meshy CEO)' },
-  { handle: 'drfeifei',     name: 'Fei-Fei Li (World Labs)' },
-  { handle: 'ZiyangXie_',   name: 'Ziyang Xie (3DV & World Models)' },
+  { handle: 'YuanmingH',     name: '胡渊鸣 (Meshy CEO)' },
+  { handle: 'drfeifei',      name: 'Fei-Fei Li (World Labs)' },
+  { handle: 'ZiyangXie_',    name: 'Ziyang Xie (3DV & World Models)' },
 
   // AI Research / Lab leads
-  { handle: 'ilyasut',      name: 'Ilya Sutskever' },
-  { handle: 'demishassabis', name: 'Demis Hassabis (DeepMind)' },
-  { handle: 'david_silver',  name: 'David Silver (DeepMind)' },
-  { handle: 'sainingxie',   name: 'Saining Xie' },
-  { handle: 'tinghuizhou',  name: 'Tinghui Zhang' },
-  { handle: 'liuziwei7',    name: 'Ziwei Liu' },
-  { handle: 'jiajunwu_cs',  name: 'Jiajun Wu' },
+  { handle: 'ilyasut',       name: 'Ilya Sutskever' },
+  { handle: 'demishassabis',  name: 'Demis Hassabis (DeepMind)' },
+  { handle: 'david_silver',   name: 'David Silver (DeepMind)' },
+  { handle: 'sainingxie',    name: 'Saining Xie' },
+  { handle: 'tinghuizhou',   name: 'Tinghui Zhou' },
+  { handle: 'liuziwei7',     name: 'Ziwei Liu' },
+  { handle: 'jiajunwu_cs',   name: 'Jiajun Wu' },
 
   // AI Infra / Systems
-  { handle: 'simon_mo_',    name: 'Simon Mo (vLLM)' },
-  { handle: 'istoica05',    name: 'Ion Stoica (Databricks/Anyscale)' },
-  { handle: 'rogerw0108',   name: 'Roger Wang (Inferact/vLLM)' },
-  { handle: 'KaichaoYou',   name: 'Kaichao You (Inferact/vLLM)' },
+  { handle: 'simon_mo_',     name: 'Simon Mo (vLLM)' },
+  { handle: 'istoica05',     name: 'Ion Stoica (Databricks/Anyscale)' },
+  { handle: 'rogerw0108',    name: 'Roger Wang (Inferact/vLLM)' },
+  { handle: 'KaichaoYou',    name: 'Kaichao You (Inferact/vLLM)' },
 
   // Meta FAIR
-  { handle: 'DavidJFan',    name: 'David Fan (Meta FAIR)' },
-  { handle: 'zhuokaiz',     name: 'Zhuokai Zhao (Meta)' },
+  { handle: 'DavidJFan',     name: 'David Fan (Meta FAIR)' },
+  { handle: 'zhuokaiz',      name: 'Zhuokai Zhao (Meta)' },
 
   // XR / Spatial Computing
-  { handle: 'dtupper',      name: 'tupper (VRChat)' },
+  { handle: 'dtupper',       name: 'tupper (VRChat)' },
 
   // Founders / VC
-  { handle: 'zoink',        name: 'Dylan Field (Figma)' },
-  { handle: 'boztank',      name: 'Boz (Meta VP AR/VR)' },
-  { handle: 'xuwu',         name: 'Xu Wu' },
-  { handle: 'zarazhangrui', name: 'Zara Zhang' },
+  { handle: 'zoink',         name: 'Dylan Field (Figma)' },
+  { handle: 'boztank',       name: 'Boz (Meta VP AR/VR)' },
+  { handle: 'xuwu',          name: 'Xu Wu' },
+  { handle: 'zarazhangrui',  name: 'Zara Zhang' },
 
   // 通用 AI builders
-  { handle: 'karpathy',     name: 'Andrej Karpathy' },
-  { handle: 'sama',         name: 'Sam Altman' },
-  { handle: 'swyx',         name: 'Swyx' },
-  { handle: 'mattturck',    name: 'Matt Turck' },
-  { handle: 'venturetwins', name: 'Justine Moore' },
-  { handle: 'garrytan',     name: 'Garry Tan' },
-  { handle: 'AmandaAskell', name: 'Amanda Askell (Anthropic)' },
+  { handle: 'karpathy',      name: 'Andrej Karpathy' },
+  { handle: 'sama',          name: 'Sam Altman' },
+  { handle: 'swyx',          name: 'Swyx' },
+  { handle: 'mattturck',     name: 'Matt Turck' },
+  { handle: 'venturetwins',  name: 'Justine Moore' },
+  { handle: 'garrytan',      name: 'Garry Tan' },
+  { handle: 'AmandaAskell',  name: 'Amanda Askell (Anthropic)' },
 ];
 
-// ─── 播客列表（YouTube channel ID）────────────────────────────────
+// ─── 播客列表 ─────────────────────────────────────────────────────
 const PODCASTS = [
-  { name: 'Latent Space',       channelId: 'UCHzRR946dbHBaXs9_qPVOtg' },
-  { name: 'No Priors',          channelId: 'UC9sIobxS3GV_qgemoMQdNdg' },
+  { name: 'Latent Space',          channelId: 'UCHzRR946dbHBaXs9_qPVOtg' },
+  { name: 'No Priors',             channelId: 'UC9sIobxS3GV_qgemoMQdNdg' },
   { name: 'Unsupervised Learning', channelId: 'UCMFMvwJM_iFMqWJkZcCRGgg' },
 ];
 
@@ -63,44 +69,32 @@ const PODCASTS = [
 async function main() {
   console.log('🚀 开始抓取内容...');
 
-  // 1. 用原有 fetch-content 脚本抓取内容
-  //    follow-builders 的原始脚本会把结果写到 output/raw-content.json
-  const { execSync } = require('child_process');
-  
   try {
-    execSync('node fetch-content.js', { 
+    execSync('node fetch-content.js', {
       cwd: __dirname,
       stdio: 'inherit',
       env: { ...process.env }
     });
   } catch (e) {
-    console.error('抓取内容失败:', e.message);
-    process.exit(1);
+    console.warn('⚠️  fetch-content 出错，继续用空内容:', e.message);
   }
 
-  // 2. 读取原始内容
-  const fs = require('fs');
-  const rawPath = `${__dirname}/../output/raw-content.json`;
+  const rawPath = join(__dirname, '../output/raw-content.json');
   let rawContent = {};
-  
-  if (fs.existsSync(rawPath)) {
-    rawContent = JSON.parse(fs.readFileSync(rawPath, 'utf8'));
+  if (existsSync(rawPath)) {
+    rawContent = JSON.parse(readFileSync(rawPath, 'utf8'));
   } else {
     console.log('⚠️  未找到 raw-content.json，使用空内容继续');
   }
 
-  // 3. 用 Claude API 生成中文摘要
   const digest = await generateChineseDigest(rawContent);
-
-  // 4. 发邮件
   await sendEmail(digest);
-  
   console.log('✅ 摘要已发送到邮箱');
 }
 
-// ─── Claude API 生成中文摘要 ───────────────────────────────────────
+// ─── Kimi API 生成中文摘要 ─────────────────────────────────────────
 async function generateChineseDigest(rawContent) {
-  const today = new Date().toLocaleDateString('zh-CN', { 
+  const today = new Date().toLocaleDateString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
   });
@@ -110,7 +104,7 @@ async function generateChineseDigest(rawContent) {
 请用中文生成一份简洁的每日摘要，格式如下：
 
 ---
-## 🤖 AI Builder 日报 · ${today}
+## 🤖 twitter daily · ${today}
 
 ### 🔥 今日重点（2-3条最值得关注的动态）
 [精选最重要的 2-3 条，简短说明为什么重要]
@@ -144,7 +138,8 @@ ${JSON.stringify(rawContent, null, 2).slice(0, 8000)}
   });
 
   if (!response.ok) {
-    console.error('Kimi API 调用失败，使用原始内容');
+    const err = await response.text();
+    console.error('Kimi API 调用失败:', err);
     return `<pre>${JSON.stringify(rawContent, null, 2)}</pre>`;
   }
 
@@ -154,14 +149,12 @@ ${JSON.stringify(rawContent, null, 2).slice(0, 8000)}
 
 // ─── 发送邮件 ──────────────────────────────────────────────────────
 async function sendEmail(digestMarkdown) {
-  const today = new Date().toLocaleDateString('zh-CN', { 
+  const today = new Date().toLocaleDateString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     month: 'long', day: 'numeric'
   });
 
-  // 简单 Markdown → HTML 转换
-  const html = `
-<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -198,9 +191,9 @@ ${digestMarkdown
   });
 
   await transporter.sendMail({
-    from: `"AI Builder 日报" <${process.env.SMTP_USER}>`,
+    from: `"twitter daily" <${process.env.SMTP_USER}>`,
     to: process.env.TO_EMAIL,
-    subject: `🤖 AI Builder 日报 · ${today}`,
+    subject: `🤖 twitter daily · ${today}`,
     html,
   });
 }
