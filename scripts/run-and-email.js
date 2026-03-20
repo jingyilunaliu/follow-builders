@@ -137,14 +137,37 @@ async function sendEmail(digestMarkdown) {
     month: 'long', day: 'numeric'
   });
 
-  // Markdown → HTML（简单转换）
-  const body = digestMarkdown
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^---$/gm, '<hr>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, '<a href="$2">$1</a>')
-    .split('\n\n').map(p => p.startsWith('<') ? p : `<p>${p}</p>`).join('\n');
+  // Markdown → HTML（逐行转换，避免截断）
+  const lines = digestMarkdown.split('\n');
+  const htmlLines = [];
+  let inPara = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('## ')) {
+      if (inPara) { htmlLines.push('</p>'); inPara = false; }
+      htmlLines.push(`<h2>${trimmed.slice(3)}</h2>`);
+    } else if (trimmed.startsWith('### ')) {
+      if (inPara) { htmlLines.push('</p>'); inPara = false; }
+      htmlLines.push(`<h3>${trimmed.slice(4)}</h3>`);
+    } else if (trimmed === '---') {
+      if (inPara) { htmlLines.push('</p>'); inPara = false; }
+      htmlLines.push('<hr>');
+    } else if (trimmed === '') {
+      if (inPara) { htmlLines.push('</p>'); inPara = false; }
+    } else {
+      // 行内格式
+      let html = trimmed
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2">$1</a>')
+        .replace(/https?:\/\/\S+/g, url => `<a href="${url}">${url}</a>`);
+      if (!inPara) { htmlLines.push('<p>'); inPara = true; }
+      htmlLines.push(html + '<br>');
+    }
+  }
+  if (inPara) htmlLines.push('</p>');
+  const body = htmlLines.join('\n');
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
