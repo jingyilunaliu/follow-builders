@@ -7,12 +7,6 @@
       "channelHandle": "LatentSpacePod"
     },
     {
-      "name": "Training Data",
-      "type": "youtube_playlist",
-      "url": "https://www.youtube.com/playlist?list=PLOhHNjZItNnMm5tdW61JpnyxeYH5NDDx8",
-      "playlistId": "PLOhHNjZItNnMm5tdW61JpnyxeYH5NDDx8"
-    },
-    {
       "name": "No Priors",
       "type": "youtube_channel",
       "url": "https://www.youtube.com/@NoPriorsPodcast",
@@ -23,39 +17,36 @@
       "type": "youtube_channel",
       "url": "https://www.youtube.com/@RedpointAI",
       "channelHandle": "RedpointAI"
-    },
-    {
-      "name": "Data Driven NYC",
-      "type": "youtube_channel",
-      "url": "https://www.youtube.com/@DataDrivenNYC/videos",
-      "channelHandle": "DataDrivenNYC"
     }
   ],
   "x_accounts": [
-    { "name": "Andrej Karpathy", "handle": "karpathy" },
-    { "name": "Swyx", "handle": "swyx" },
-    { "name": "Josh Woodward", "handle": "joshwoodward" },
-    { "name": "Kevin Weil", "handle": "kevinweil" },
-    { "name": "Peter Yang", "handle": "petergyang" },
-    { "name": "Nan Yu", "handle": "thenanyu" },
-    { "name": "Madhu Guru", "handle": "realmadhuguru" },
-    { "name": "Amanda Askell", "handle": "AmandaAskell" },
-    { "name": "Cat Wu", "handle": "_catwu" },
-    { "name": "Thariq", "handle": "trq212" },
-    { "name": "Google Labs", "handle": "GoogleLabs" },
-    { "name": "Amjad Masad", "handle": "amasad" },
-    { "name": "Guillermo Rauch", "handle": "rauchg" },
-    { "name": "Alex Albert", "handle": "alexalbert__" },
-    { "name": "Aaron Levie", "handle": "levie" },
-    { "name": "Ryo Lu", "handle": "ryolu_" },
-    { "name": "Garry Tan", "handle": "garrytan" },
-    { "name": "Matt Turck", "handle": "mattturck" },
+    { "name": "胡渊鸣 (Meshy CEO)", "handle": "YuanmingH" },
+    { "name": "Fei-Fei Li (World Labs)", "handle": "drfeifei" },
+    { "name": "Ziyang Xie (3DV & World Models)", "handle": "ZiyangXie_" },
+    { "name": "Ilya Sutskever", "handle": "ilyasut" },
+    { "name": "Demis Hassabis (DeepMind)", "handle": "demishassabis" },
+    { "name": "David Silver (DeepMind)", "handle": "david_silver" },
+    { "name": "Saining Xie", "handle": "sainingxie" },
+    { "name": "Tinghui Zhou", "handle": "tinghuizhou" },
+    { "name": "Ziwei Liu", "handle": "liuziwei7" },
+    { "name": "Jiajun Wu", "handle": "jiajunwu_cs" },
+    { "name": "Simon Mo (vLLM)", "handle": "simon_mo_" },
+    { "name": "Ion Stoica (Databricks/Anyscale)", "handle": "istoica05" },
+    { "name": "Roger Wang (Inferact/vLLM)", "handle": "rogerw0108" },
+    { "name": "Kaichao You (Inferact/vLLM)", "handle": "KaichaoYou" },
+    { "name": "David Fan (Meta FAIR)", "handle": "DavidJFan" },
+    { "name": "Zhuokai Zhao (Meta)", "handle": "zhuokaiz" },
+    { "name": "tupper (VRChat)", "handle": "dtupper" },
+    { "name": "Dylan Field (Figma)", "handle": "zoink" },
+    { "name": "Boz (Meta VP AR/VR)", "handle": "boztank" },
+    { "name": "Xu Wu", "handle": "xuwu" },
     { "name": "Zara Zhang", "handle": "zarazhangrui" },
-    { "name": "Nikunj Kothari", "handle": "nikunj" },
-    { "name": "Peter Steinberger", "handle": "steipete" },
-    { "name": "Dan Shipper", "handle": "danshipper" },
-    { "name": "Aditya Agarwal", "handle": "adityaag" },
+    { "name": "Andrej Karpathy", "handle": "karpathy" },
     { "name": "Sam Altman", "handle": "sama" },
-    { "name": "Claude", "handle": "claudeai" }
+    { "name": "Swyx", "handle": "swyx" },
+    { "name": "Matt Turck", "handle": "mattturck" },
+    { "name": "Justine Moore", "handle": "venturetwins" },
+    { "name": "Garry Tan", "handle": "garrytan" },
+    { "name": "Amanda Askell (Anthropic)", "handle": "AmandaAskell" }
   ]
 }
