@@ -70,13 +70,17 @@ async function main() {
   console.log('🚀 开始抓取内容...');
 
   try {
-    execSync('node fetch-content.js', {
+    const result = execSync('node fetch-content.js', {
       cwd: __dirname,
-      stdio: 'inherit',
+      stdio: 'pipe',
       env: { ...process.env }
     });
+    console.log(result.toString());
   } catch (e) {
-    console.warn('⚠️  fetch-content 出错，继续用空内容:', e.message);
+    console.warn("⚠️  fetch-content 出错详情:");
+    console.warn("stderr:", e.stderr?.toString());
+    console.warn("stdout:", e.stdout?.toString());
+    console.warn("message:", e.message);
   }
 
   const rawPath = join(__dirname, '../output/raw-content.json');
@@ -126,7 +130,7 @@ ${JSON.stringify(rawContent, null, 2).slice(0, 8000)}
 
   const apiKey = process.env.GEMINI_API_KEY || '';
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
