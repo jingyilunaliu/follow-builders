@@ -124,27 +124,27 @@ ${JSON.stringify(rawContent, null, 2).slice(0, 8000)}
 
 注意：如果某类内容为空，跳过该部分即可，不要生成占位文字。`;
 
-  const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.KIMI_API_KEY || ''}`
-    },
-    body: JSON.stringify({
-      model: 'kimi-k2.5',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
+  const apiKey = process.env.GEMINI_API_KEY || '';
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 2000 }
+      })
+    }
+  );
 
   if (!response.ok) {
     const err = await response.text();
-    console.error('Kimi API 调用失败:', err);
+    console.error('Gemini API 调用失败:', err);
     return `<pre>${JSON.stringify(rawContent, null, 2)}</pre>`;
   }
 
   const data = await response.json();
-  return data.choices[0].message.content;
+  return data.candidates[0].content.parts[0].text;
 }
 
 // ─── 发送邮件 ──────────────────────────────────────────────────────
