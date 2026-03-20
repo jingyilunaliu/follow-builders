@@ -6,7 +6,7 @@ import { join } from 'path';
 import { Rettiwt } from 'rettiwt-api';
 
 const SUPADATA_BASE = 'https://api.supadata.ai/v1';
-const TWEET_LOOKBACK_HOURS = 72;   // 扩展到 72 小时，researcher 不是每天发推
+const TWEET_LOOKBACK_HOURS = 336;   // 14天，覆盖 Rettiwt guest 模式返回数据不保证最新的问题
 const PODCAST_LOOKBACK_HOURS = 72;
 const MAX_TWEETS_PER_USER = 3;
 
@@ -55,7 +55,7 @@ async function fetchXContent(xAccounts, state, errors) {
       }
 
       const timeline = await rettiwt.user.timeline(userDetails.id, 10);
-      const allTweets = timeline?.list || [];
+      const allTweets = (timeline?.list || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
       console.error(`  @${account.handle}: ${allTweets.length} tweets fetched`);
 
