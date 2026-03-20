@@ -1,7 +1,7 @@
 /**
  * run-and-email.js
  * 放到 follow-builders/scripts/ 目录下
- * ESM 格式（匹配 repo 的 "type": "module"）
+ * ESM 格式，对接 generate-feed.js 的输出
  */
 
 import nodemailer from 'nodemailer';
@@ -12,99 +12,75 @@ import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-// ─── 你的自定义关注列表 ───────────────────────────────────────────
-const CUSTOM_X_ACCOUNTS = [
-  // 3D Gen / Spatial AI
-  { handle: 'YuanmingH',     name: '胡渊鸣 (Meshy CEO)' },
-  { handle: 'drfeifei',      name: 'Fei-Fei Li (World Labs)' },
-  { handle: 'ZiyangXie_',    name: 'Ziyang Xie (3DV & World Models)' },
-
-  // AI Research / Lab leads
-  { handle: 'ilyasut',       name: 'Ilya Sutskever' },
-  { handle: 'demishassabis',  name: 'Demis Hassabis (DeepMind)' },
-  { handle: 'david_silver',   name: 'David Silver (DeepMind)' },
-  { handle: 'sainingxie',    name: 'Saining Xie' },
-  { handle: 'tinghuizhou',   name: 'Tinghui Zhou' },
-  { handle: 'liuziwei7',     name: 'Ziwei Liu' },
-  { handle: 'jiajunwu_cs',   name: 'Jiajun Wu' },
-
-  // AI Infra / Systems
-  { handle: 'simon_mo_',     name: 'Simon Mo (vLLM)' },
-  { handle: 'istoica05',     name: 'Ion Stoica (Databricks/Anyscale)' },
-  { handle: 'rogerw0108',    name: 'Roger Wang (Inferact/vLLM)' },
-  { handle: 'KaichaoYou',    name: 'Kaichao You (Inferact/vLLM)' },
-
-  // Meta FAIR
-  { handle: 'DavidJFan',     name: 'David Fan (Meta FAIR)' },
-  { handle: 'zhuokaiz',      name: 'Zhuokai Zhao (Meta)' },
-
-  // XR / Spatial Computing
-  { handle: 'dtupper',       name: 'tupper (VRChat)' },
-
-  // Founders / VC
-  { handle: 'zoink',         name: 'Dylan Field (Figma)' },
-  { handle: 'boztank',       name: 'Boz (Meta VP AR/VR)' },
-  { handle: 'xuwu',          name: 'Xu Wu' },
-  { handle: 'zarazhangrui',  name: 'Zara Zhang' },
-
-  // 通用 AI builders
-  { handle: 'karpathy',      name: 'Andrej Karpathy' },
-  { handle: 'sama',          name: 'Sam Altman' },
-  { handle: 'swyx',          name: 'Swyx' },
-  { handle: 'mattturck',     name: 'Matt Turck' },
-  { handle: 'venturetwins',  name: 'Justine Moore' },
-  { handle: 'garrytan',      name: 'Garry Tan' },
-  { handle: 'AmandaAskell',  name: 'Amanda Askell (Anthropic)' },
-];
-
-// ─── 播客列表 ─────────────────────────────────────────────────────
-const PODCASTS = [
-  { name: 'Latent Space',          channelId: 'UCHzRR946dbHBaXs9_qPVOtg' },
-  { name: 'No Priors',             channelId: 'UC9sIobxS3GV_qgemoMQdNdg' },
-  { name: 'Unsupervised Learning', channelId: 'UCMFMvwJM_iFMqWJkZcCRGgg' },
-];
+const ROOT = join(__dirname, '..');
 
 // ─── 主函数 ────────────────────────────────────────────────────────
 async function main() {
   console.log('🚀 开始抓取内容...');
 
+  // 1. 运行 generate-feed.js 抓取推文和播客
   try {
-    const result = execSync('node fetch-content.js', {
+    const result = execSync('node generate-feed.js', {
       cwd: __dirname,
       stdio: 'pipe',
       env: { ...process.env }
     });
     console.log(result.toString());
   } catch (e) {
-    console.warn("⚠️  fetch-content 出错详情:");
-    console.warn("stderr:", e.stderr?.toString());
-    console.warn("stdout:", e.stdout?.toString());
-    console.warn("message:", e.message);
+    console.warn('⚠️  generate-feed 出错详情:');
+    console.warn('stderr:', e.stderr?.toString());
+    console.warn('stdout:', e.stdout?.toString());
   }
 
-  const rawPath = join(__dirname, '../output/raw-content.json');
-  let rawContent = {};
-  if (existsSync(rawPath)) {
-    rawContent = JSON.parse(readFileSync(rawPath, 'utf8'));
+  // 2. 读取输出的 feed 文件
+  let xFeed = { x: [] };
+  let podcastFeed = { podcasts: [] };
+
+  const xPath = join(ROOT, 'feed-x.json');
+  const podcastPath = join(ROOT, 'feed-podcasts.json');
+
+  if (existsSync(xPath)) {
+    xFeed = JSON.parse(readFileSync(xPath, 'utf8'));
+    console.log(`✅ 读取 feed-x.json: ${xFeed.x?.length || 0} 个 builder`);
   } else {
-    console.log('⚠️  未找到 raw-content.json，使用空内容继续');
+    console.log('⚠️  未找到 feed-x.json');
   }
 
-  const digest = await generateChineseDigest(rawContent);
+  if (existsSync(podcastPath)) {
+    podcastFeed = JSON.parse(readFileSync(podcastPath, 'utf8'));
+    console.log(`✅ 读取 feed-podcasts.json: ${podcastFeed.podcasts?.length || 0} 个播客`);
+  } else {
+    console.log('⚠️  未找到 feed-podcasts.json');
+  }
+
+  // 3. 用 Gemini 生成中文摘要
+  const digest = await generateChineseDigest(xFeed, podcastFeed);
+
+  // 4. 发邮件
   await sendEmail(digest);
   console.log('✅ 摘要已发送到邮箱');
 }
 
-// ─── Kimi API 生成中文摘要 ─────────────────────────────────────────
-async function generateChineseDigest(rawContent) {
+// ─── Gemini API 生成中文摘要 ──────────────────────────────────────
+async function generateChineseDigest(xFeed, podcastFeed) {
   const today = new Date().toLocaleDateString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
   });
 
+  const xSummary = (xFeed.x || []).map(builder =>
+    `@${builder.handle} (${builder.name}):\n` +
+    builder.tweets.map(t => `  - ${t.text} [${t.url}]`).join('\n')
+  ).join('\n\n');
+
+  const podcastSummary = (podcastFeed.podcasts || []).map(p =>
+    `${p.name}: 《${p.title}》\n transcript: ${(p.transcript || '').slice(0, 1000)}`
+  ).join('\n\n');
+
+  const hasContent = xSummary.length > 0 || podcastSummary.length > 0;
+
   const prompt = `你是一个专注于 AI、3D 生成、空间计算领域的投资人助手。
-以下是今日从 X（Twitter）和播客抓取的原始内容。
+以下是今日从 X（Twitter）和播客抓取的内容。
 请用中文生成一份简洁的每日摘要，格式如下：
 
 ---
@@ -123,8 +99,7 @@ async function generateChineseDigest(rawContent) {
 [从 3D 生成、空间智能、AI infra 角度，提炼 1-2 个值得关注的信号]
 ---
 
-原始内容：
-${JSON.stringify(rawContent, null, 2).slice(0, 8000)}
+${hasContent ? `X 推文内容：\n${xSummary}\n\n播客内容：\n${podcastSummary}` : '今日暂无新内容，请生成一条简短提示说明暂无更新。'}
 
 注意：如果某类内容为空，跳过该部分即可，不要生成占位文字。`;
 
@@ -144,7 +119,7 @@ ${JSON.stringify(rawContent, null, 2).slice(0, 8000)}
   if (!response.ok) {
     const err = await response.text();
     console.error('Gemini API 调用失败:', err);
-    return `<pre>${JSON.stringify(rawContent, null, 2)}</pre>`;
+    return `<p>今日内容生成失败，请检查 Gemini API 配置。</p>`;
   }
 
   const data = await response.json();
