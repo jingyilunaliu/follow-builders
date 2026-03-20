@@ -23,7 +23,7 @@ jobs:
         run: |
           cd scripts
           npm install
-          npm install nodemailer
+          npm install nodemailer rettiwt-api
 
       - name: Run digest and send email
         env:
@@ -34,5 +34,4 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
         run: node scripts/run-and-email.js
