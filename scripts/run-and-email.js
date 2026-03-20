@@ -110,7 +110,7 @@ async function generateChineseDigest(rawContent) {
 请用中文生成一份简洁的每日摘要，格式如下：
 
 ---
-## 🤖 twitter daily · ${today}
+## 🤖 AI Builder 日报 · ${today}
 
 ### 🔥 今日重点（2-3条最值得关注的动态）
 [精选最重要的 2-3 条，简短说明为什么重要]
@@ -130,27 +130,26 @@ ${JSON.stringify(rawContent, null, 2).slice(0, 8000)}
 
 注意：如果某类内容为空，跳过该部分即可，不要生成占位文字。`;
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY || '',
-      'anthropic-version': '2023-06-01'
+      'Authorization': `Bearer ${process.env.KIMI_API_KEY || ''}`
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-5',
+      model: 'kimi-k2.5',
       max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }]
     })
   });
 
   if (!response.ok) {
-    console.error('Claude API 调用失败，使用原始内容');
+    console.error('Kimi API 调用失败，使用原始内容');
     return `<pre>${JSON.stringify(rawContent, null, 2)}</pre>`;
   }
 
   const data = await response.json();
-  return data.content[0].text;
+  return data.choices[0].message.content;
 }
 
 // ─── 发送邮件 ──────────────────────────────────────────────────────
@@ -201,7 +200,7 @@ ${digestMarkdown
   await transporter.sendMail({
     from: `"AI Builder 日报" <${process.env.SMTP_USER}>`,
     to: process.env.TO_EMAIL,
-    subject: `🤖 twitter daily · ${today}`,
+    subject: `🤖 AI Builder 日报 · ${today}`,
     html,
   });
 }
