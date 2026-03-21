@@ -120,7 +120,7 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
           if (publishedAt) {
             allCandidates.push({ podcast, videoId, title: meta.title || 'Untitled', publishedAt });
           }
-          await new Promise(r => setTimeout(r, 300));
+          await new Promise(r => setTimeout(r, 1000));
         } catch (err) { errors.push(`YouTube: ${videoId} 元数据错误: ${err.message}`); }
       }
     } catch (err) { errors.push(`YouTube: ${podcast.name} 错误: ${err.message}`); }
