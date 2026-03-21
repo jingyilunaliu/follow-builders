@@ -6,7 +6,7 @@ import { join } from 'path';
 
 const SUPADATA_BASE = 'https://api.supadata.ai/v1';
 const TWITTERAPI_BASE = 'https://api.twitterapi.io';
-const TWEET_LOOKBACK_HOURS = 24;
+const TWEET_LOOKBACK_HOURS = 72;
 const PODCAST_LOOKBACK_HOURS = 72;
 const MAX_TWEETS_PER_USER = 3;
 
