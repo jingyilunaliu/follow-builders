@@ -1,10 +1,5 @@
 #!/usr/bin/env node
 
-// ============================================================================
-// Follow Builders — Central Feed Generator (Luna 定制版)
-// 用 TwitterAPI.io 抓推文（实时，按时间排序）
-// ============================================================================
-
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -18,75 +13,80 @@ const MAX_TWEETS_PER_USER = 3;
 const SCRIPT_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname);
 const STATE_PATH = join(SCRIPT_DIR, '..', 'state-feed.json');
 
-// -- State Management --------------------------------------------------------
-
 async function loadState() {
   if (!existsSync(STATE_PATH)) return { seenTweets: {}, seenVideos: {} };
-  try {
-    return JSON.parse(await readFile(STATE_PATH, 'utf-8'));
-  } catch {
-    return { seenTweets: {}, seenVideos: {} };
-  }
+  try { return JSON.parse(await readFile(STATE_PATH, 'utf-8')); }
+  catch { return { seenTweets: {}, seenVideos: {} }; }
 }
 
 async function saveState(state) {
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  for (const [id, ts] of Object.entries(state.seenTweets)) {
-    if (ts < cutoff) delete state.seenTweets[id];
-  }
-  for (const [id, ts] of Object.entries(state.seenVideos)) {
-    if (ts < cutoff) delete state.seenVideos[id];
-  }
+  for (const [id, ts] of Object.entries(state.seenTweets)) { if (ts < cutoff) delete state.seenTweets[id]; }
+  for (const [id, ts] of Object.entries(state.seenVideos)) { if (ts < cutoff) delete state.seenVideos[id]; }
   await writeFile(STATE_PATH, JSON.stringify(state, null, 2));
 }
 
 async function loadSources() {
-  const sourcesPath = join(SCRIPT_DIR, '..', 'config', 'default-sources.json');
-  return JSON.parse(await readFile(sourcesPath, 'utf-8'));
+  return JSON.parse(await readFile(join(SCRIPT_DIR, '..', 'config', 'default-sources.json'), 'utf-8'));
 }
 
-// -- X/Twitter Fetching (TwitterAPI.io) --------------------------------------
+// -- 把 handle 转成 userId --------------------------------------------------
+async function getUserId(handle, apiKey, errors) {
+  try {
+    const res = await fetch(
+      `${TWITTERAPI_BASE}/twitter/user/info?userName=${handle}`,
+      { headers: { 'X-API-Key': apiKey } }
+    );
+    if (!res.ok) {
+      errors.push(`TwitterAPI.io: getUserId failed for @${handle}: HTTP ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    return data?.data?.id || null;
+  } catch (err) {
+    errors.push(`TwitterAPI.io: getUserId error for @${handle}: ${err.message}`);
+    return null;
+  }
+}
 
+// -- 抓推文 -----------------------------------------------------------------
 async function fetchXContent(xAccounts, apiKey, state, errors) {
   const results = [];
   const cutoff = new Date(Date.now() - TWEET_LOOKBACK_HOURS * 60 * 60 * 1000);
-
   console.error(`  Lookback cutoff: ${cutoff.toISOString()}`);
 
   for (const account of xAccounts) {
     try {
-      // TwitterAPI.io: GET /twitter/user/tweet_timeline?userName=<handle>
+      // 1. handle → userId
+      const userId = await getUserId(account.handle, apiKey, errors);
+      if (!userId) {
+        console.error(`  @${account.handle}: 无法获取 userId，跳过`);
+        continue;
+      }
+      await new Promise(r => setTimeout(r, 300));
+
+      // 2. 拉 timeline
       const res = await fetch(
-        `${TWITTERAPI_BASE}/twitter/user/tweet_timeline?userName=${account.handle}&count=20`,
-        {
-          headers: {
-            'X-API-Key': apiKey,
-            'Content-Type': 'application/json'
-          }
-        }
+        `${TWITTERAPI_BASE}/twitter/user/tweet_timeline?userId=${userId}&includeReplies=false`,
+        { headers: { 'X-API-Key': apiKey } }
       );
 
       if (!res.ok) {
-        errors.push(`TwitterAPI.io: Failed to fetch @${account.handle}: HTTP ${res.status}`);
+        errors.push(`TwitterAPI.io: timeline failed for @${account.handle}: HTTP ${res.status}`);
         continue;
       }
 
       const data = await res.json();
       const allTweets = data.tweets || [];
-
       console.error(`  @${account.handle}: ${allTweets.length} tweets fetched`);
 
-      // TwitterAPI.io 返回按时间排序的推文（最新在前）
       const newTweets = [];
       for (const tweet of allTweets) {
         if (newTweets.length >= MAX_TWEETS_PER_USER) break;
-
         const tweetDate = new Date(tweet.createdAt);
-        if (tweetDate < cutoff) break; // 已按时间排序，后面的更旧，直接跳出
-
+        if (tweetDate < cutoff) break; // 按时间排序，直接跳出
         if (state.seenTweets[tweet.id]) continue;
-        if (tweet.isReply) continue; // 跳过回复
-        if ((tweet.text || '').startsWith('RT @')) continue; // 跳过转推
+        if ((tweet.text || '').startsWith('RT @')) continue;
 
         newTweets.push({
           id: tweet.id,
@@ -97,116 +97,71 @@ async function fetchXContent(xAccounts, apiKey, state, errors) {
           retweets: tweet.retweetCount || 0,
           replies: tweet.replyCount || 0,
         });
-
         state.seenTweets[tweet.id] = Date.now();
       }
 
       if (newTweets.length === 0) continue;
-
       console.error(`    → ${newTweets.length} new tweets kept`);
-      results.push({
-        source: 'x',
-        name: account.name,
-        handle: account.handle,
-        tweets: newTweets
-      });
+      results.push({ source: 'x', name: account.name, handle: account.handle, tweets: newTweets });
 
-      // 控制请求频率
-      await new Promise(r => setTimeout(r, 200));
-
+      await new Promise(r => setTimeout(r, 300));
     } catch (err) {
-      errors.push(`TwitterAPI.io: Error fetching @${account.handle}: ${err.message}`);
+      errors.push(`TwitterAPI.io: error for @${account.handle}: ${err.message}`);
     }
   }
-
   return results;
 }
 
-// -- YouTube Fetching (Supadata API) -----------------------------------------
-
+// -- 抓播客 -----------------------------------------------------------------
 async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
   const cutoff = new Date(Date.now() - PODCAST_LOOKBACK_HOURS * 60 * 60 * 1000);
   const allCandidates = [];
 
   for (const podcast of podcasts) {
     try {
-      let videosUrl;
-      if (podcast.type === 'youtube_playlist') {
-        videosUrl = `${SUPADATA_BASE}/youtube/playlist/videos?id=${podcast.playlistId}`;
-      } else {
-        videosUrl = `${SUPADATA_BASE}/youtube/channel/videos?id=${podcast.channelHandle}&type=video`;
-      }
+      const videosUrl = podcast.type === 'youtube_playlist'
+        ? `${SUPADATA_BASE}/youtube/playlist/videos?id=${podcast.playlistId}`
+        : `${SUPADATA_BASE}/youtube/channel/videos?id=${podcast.channelHandle}&type=video`;
 
       const videosRes = await fetch(videosUrl, { headers: { 'x-api-key': apiKey } });
-      if (!videosRes.ok) {
-        errors.push(`YouTube: Failed for ${podcast.name}: HTTP ${videosRes.status}`);
-        continue;
-      }
+      if (!videosRes.ok) { errors.push(`YouTube: Failed for ${podcast.name}: HTTP ${videosRes.status}`); continue; }
 
-      const videosData = await videosRes.json();
-      const videoIds = videosData.videoIds || videosData.video_ids || [];
-
+      const videoIds = (await videosRes.json()).videoIds || [];
       for (const videoId of videoIds.slice(0, 2)) {
         if (state.seenVideos[videoId]) continue;
         try {
           const metaRes = await fetch(`${SUPADATA_BASE}/youtube/video?id=${videoId}`, { headers: { 'x-api-key': apiKey } });
           if (!metaRes.ok) continue;
           const meta = await metaRes.json();
-          allCandidates.push({
-            podcast, videoId,
-            title: meta.title || 'Untitled',
-            publishedAt: meta.uploadDate || meta.publishedAt || meta.date || null
-          });
+          allCandidates.push({ podcast, videoId, title: meta.title || 'Untitled', publishedAt: meta.uploadDate || meta.publishedAt || meta.date || null });
           await new Promise(r => setTimeout(r, 300));
-        } catch (err) {
-          errors.push(`YouTube: Error for ${videoId}: ${err.message}`);
-        }
+        } catch (err) { errors.push(`YouTube: metadata error for ${videoId}: ${err.message}`); }
       }
-    } catch (err) {
-      errors.push(`YouTube: Error for ${podcast.name}: ${err.message}`);
-    }
+    } catch (err) { errors.push(`YouTube: error for ${podcast.name}: ${err.message}`); }
   }
 
-  const withinWindow = allCandidates
+  const selected = allCandidates
     .filter(v => v.publishedAt && new Date(v.publishedAt) >= cutoff)
-    .sort((a, b) => new Date(a.publishedAt) - new Date(b.publishedAt));
+    .sort((a, b) => new Date(a.publishedAt) - new Date(b.publishedAt))[0];
 
-  const selected = withinWindow[0];
   if (!selected) return [];
 
   try {
-    const videoUrl = `https://www.youtube.com/watch?v=${selected.videoId}`;
     const transcriptRes = await fetch(
-      `${SUPADATA_BASE}/youtube/transcript?url=${encodeURIComponent(videoUrl)}&text=true`,
+      `${SUPADATA_BASE}/youtube/transcript?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${selected.videoId}`)}&text=true`,
       { headers: { 'x-api-key': apiKey } }
     );
-    if (!transcriptRes.ok) {
-      errors.push(`YouTube: Transcript failed: HTTP ${transcriptRes.status}`);
-      return [];
-    }
+    if (!transcriptRes.ok) { errors.push(`YouTube: transcript failed: HTTP ${transcriptRes.status}`); return []; }
     const transcriptData = await transcriptRes.json();
     state.seenVideos[selected.videoId] = Date.now();
-    return [{
-      source: 'podcast',
-      name: selected.podcast.name,
-      title: selected.title,
-      videoId: selected.videoId,
-      url: `https://youtube.com/watch?v=${selected.videoId}`,
-      publishedAt: selected.publishedAt,
-      transcript: transcriptData.content || ''
-    }];
-  } catch (err) {
-    errors.push(`YouTube: Transcript error: ${err.message}`);
-    return [];
-  }
+    return [{ source: 'podcast', name: selected.podcast.name, title: selected.title, videoId: selected.videoId, url: `https://youtube.com/watch?v=${selected.videoId}`, publishedAt: selected.publishedAt, transcript: transcriptData.content || '' }];
+  } catch (err) { errors.push(`YouTube: transcript error: ${err.message}`); return []; }
 }
 
-// -- Main --------------------------------------------------------------------
-
+// -- Main -------------------------------------------------------------------
 async function main() {
   const twitterApiKey = process.env.TWITTERAPI_IO_KEY;
   const supadataKey = process.env.SUPADATA_API_KEY;
-
   if (!supadataKey) { console.error('SUPADATA_API_KEY not set'); process.exit(1); }
   if (!twitterApiKey) { console.error('TWITTERAPI_IO_KEY not set'); process.exit(1); }
 
@@ -214,41 +169,29 @@ async function main() {
   const state = await loadState();
   const errors = [];
 
-  // 抓推文
   console.error('Fetching X/Twitter content via TwitterAPI.io...');
   const xContent = await fetchXContent(sources.x_accounts, twitterApiKey, state, errors);
   const totalTweets = xContent.reduce((sum, a) => sum + a.tweets.length, 0);
   console.error(`  Found ${xContent.length} builders with ${totalTweets} new tweets`);
 
   await writeFile(join(SCRIPT_DIR, '..', 'feed-x.json'), JSON.stringify({
-    generatedAt: new Date().toISOString(),
-    lookbackHours: TWEET_LOOKBACK_HOURS,
-    x: xContent,
-    stats: { xBuilders: xContent.length, totalTweets },
-    errors: errors.filter(e => e.startsWith('TwitterAPI')).length > 0
-      ? errors.filter(e => e.startsWith('TwitterAPI')) : undefined
+    generatedAt: new Date().toISOString(), lookbackHours: TWEET_LOOKBACK_HOURS,
+    x: xContent, stats: { xBuilders: xContent.length, totalTweets },
+    errors: errors.filter(e => e.startsWith('TwitterAPI')).length > 0 ? errors.filter(e => e.startsWith('TwitterAPI')) : undefined
   }, null, 2));
 
-  // 抓播客
   console.error('Fetching YouTube content...');
   const podcasts = await fetchYouTubeContent(sources.podcasts, supadataKey, state, errors);
   console.error(`  Found ${podcasts.length} new episodes`);
 
   await writeFile(join(SCRIPT_DIR, '..', 'feed-podcasts.json'), JSON.stringify({
-    generatedAt: new Date().toISOString(),
-    lookbackHours: PODCAST_LOOKBACK_HOURS,
-    podcasts,
-    stats: { podcastEpisodes: podcasts.length },
-    errors: errors.filter(e => e.startsWith('YouTube')).length > 0
-      ? errors.filter(e => e.startsWith('YouTube')) : undefined
+    generatedAt: new Date().toISOString(), lookbackHours: PODCAST_LOOKBACK_HOURS,
+    podcasts, stats: { podcastEpisodes: podcasts.length },
+    errors: errors.filter(e => e.startsWith('YouTube')).length > 0 ? errors.filter(e => e.startsWith('YouTube')) : undefined
   }, null, 2));
 
   await saveState(state);
-
-  if (errors.length > 0) {
-    console.error(`  ${errors.length} non-fatal errors:`);
-    errors.forEach(e => console.error('   -', e));
-  }
+  if (errors.length > 0) { console.error(`  ${errors.length} non-fatal errors:`); errors.forEach(e => console.error('   -', e)); }
 }
 
 main().catch(err => { console.error('Feed generation failed:', err.message); process.exit(1); });
