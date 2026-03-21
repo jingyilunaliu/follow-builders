@@ -62,6 +62,7 @@ async function fetchXContent(xAccounts, apiKey, state, errors) {
       }
 
       const data = await res.json();
+      if (account.handle === "karpathy") console.error("  @karpathy raw:", JSON.stringify(data).slice(0, 500));
       const allTweets = data.tweets || [];
 
       // Debug：打印最新几条推文的时间
