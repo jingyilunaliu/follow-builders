@@ -30,26 +30,7 @@ async function loadSources() {
   return JSON.parse(await readFile(join(SCRIPT_DIR, '..', 'config', 'default-sources.json'), 'utf-8'));
 }
 
-// -- 把 handle 转成 userId --------------------------------------------------
-async function getUserId(handle, apiKey, errors) {
-  try {
-    const res = await fetch(
-      `${TWITTERAPI_BASE}/twitter/user/info?userName=${handle}`,
-      { headers: { 'X-API-Key': apiKey } }
-    );
-    if (!res.ok) {
-      errors.push(`TwitterAPI.io: getUserId failed for @${handle}: HTTP ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
-    return data?.data?.id || null;
-  } catch (err) {
-    errors.push(`TwitterAPI.io: getUserId error for @${handle}: ${err.message}`);
-    return null;
-  }
-}
-
-// -- 抓推文 -----------------------------------------------------------------
+// -- 抓推文 (用 /last_tweets，直接传 userName，不需要 userId) ----------------
 async function fetchXContent(xAccounts, apiKey, state, errors) {
   const results = [];
   const cutoff = new Date(Date.now() - TWEET_LOOKBACK_HOURS * 60 * 60 * 1000);
@@ -57,22 +38,14 @@ async function fetchXContent(xAccounts, apiKey, state, errors) {
 
   for (const account of xAccounts) {
     try {
-      // 1. handle → userId
-      const userId = await getUserId(account.handle, apiKey, errors);
-      if (!userId) {
-        console.error(`  @${account.handle}: 无法获取 userId，跳过`);
-        continue;
-      }
-      await new Promise(r => setTimeout(r, 300));
-
-      // 2. 拉 timeline
       const res = await fetch(
-        `${TWITTERAPI_BASE}/twitter/user/tweet_timeline?userId=${userId}&includeReplies=false`,
+        `${TWITTERAPI_BASE}/twitter/user/last_tweets?userName=${account.handle}&includeReplies=false`,
         { headers: { 'X-API-Key': apiKey } }
       );
 
       if (!res.ok) {
-        errors.push(`TwitterAPI.io: timeline failed for @${account.handle}: HTTP ${res.status}`);
+        errors.push(`TwitterAPI.io: failed @${account.handle}: HTTP ${res.status}`);
+        await new Promise(r => setTimeout(r, 2000)); // 遇到错误多等一下
         continue;
       }
 
@@ -100,13 +73,15 @@ async function fetchXContent(xAccounts, apiKey, state, errors) {
         state.seenTweets[tweet.id] = Date.now();
       }
 
-      if (newTweets.length === 0) continue;
-      console.error(`    → ${newTweets.length} new tweets kept`);
-      results.push({ source: 'x', name: account.name, handle: account.handle, tweets: newTweets });
+      if (newTweets.length > 0) {
+        console.error(`    → ${newTweets.length} new tweets kept`);
+        results.push({ source: 'x', name: account.name, handle: account.handle, tweets: newTweets });
+      }
 
-      await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 500)); // 每次请求间隔 500ms
+
     } catch (err) {
-      errors.push(`TwitterAPI.io: error for @${account.handle}: ${err.message}`);
+      errors.push(`TwitterAPI.io: error @${account.handle}: ${err.message}`);
     }
   }
   return results;
@@ -135,9 +110,9 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
           const meta = await metaRes.json();
           allCandidates.push({ podcast, videoId, title: meta.title || 'Untitled', publishedAt: meta.uploadDate || meta.publishedAt || meta.date || null });
           await new Promise(r => setTimeout(r, 300));
-        } catch (err) { errors.push(`YouTube: metadata error for ${videoId}: ${err.message}`); }
+        } catch (err) { errors.push(`YouTube: metadata error ${videoId}: ${err.message}`); }
       }
-    } catch (err) { errors.push(`YouTube: error for ${podcast.name}: ${err.message}`); }
+    } catch (err) { errors.push(`YouTube: error ${podcast.name}: ${err.message}`); }
   }
 
   const selected = allCandidates
