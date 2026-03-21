@@ -1,17 +1,24 @@
 #!/usr/bin/env node
 
+// ============================================================================
+// Follow Builders — Central Feed Generator (Luna 定制版)
+// 用 TwitterAPI.io 抓推文（实时，按时间排序）
+// ============================================================================
+
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { Rettiwt } from 'rettiwt-api';
 
 const SUPADATA_BASE = 'https://api.supadata.ai/v1';
-const TWEET_LOOKBACK_HOURS = 336;   // 14天，覆盖 Rettiwt guest 模式返回数据不保证最新的问题
+const TWITTERAPI_BASE = 'https://api.twitterapi.io';
+const TWEET_LOOKBACK_HOURS = 24;
 const PODCAST_LOOKBACK_HOURS = 72;
 const MAX_TWEETS_PER_USER = 3;
 
 const SCRIPT_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname);
 const STATE_PATH = join(SCRIPT_DIR, '..', 'state-feed.json');
+
+// -- State Management --------------------------------------------------------
 
 async function loadState() {
   if (!existsSync(STATE_PATH)) return { seenTweets: {}, seenVideos: {} };
@@ -38,47 +45,54 @@ async function loadSources() {
   return JSON.parse(await readFile(sourcesPath, 'utf-8'));
 }
 
-async function fetchXContent(xAccounts, state, errors) {
+// -- X/Twitter Fetching (TwitterAPI.io) --------------------------------------
+
+async function fetchXContent(xAccounts, apiKey, state, errors) {
   const results = [];
   const cutoff = new Date(Date.now() - TWEET_LOOKBACK_HOURS * 60 * 60 * 1000);
-  const rettiwt = new Rettiwt();
 
   console.error(`  Lookback cutoff: ${cutoff.toISOString()}`);
-  console.error(`  SeenTweets count: ${Object.keys(state.seenTweets).length}`);
 
   for (const account of xAccounts) {
     try {
-      const userDetails = await rettiwt.user.details(account.handle);
-      if (!userDetails) {
-        errors.push(`Rettiwt: User not found: @${account.handle}`);
+      // TwitterAPI.io: GET /twitter/user/tweet_timeline?userName=<handle>
+      const res = await fetch(
+        `${TWITTERAPI_BASE}/twitter/user/tweet_timeline?userName=${account.handle}&count=20`,
+        {
+          headers: {
+            'X-API-Key': apiKey,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (!res.ok) {
+        errors.push(`TwitterAPI.io: Failed to fetch @${account.handle}: HTTP ${res.status}`);
         continue;
       }
 
-      const timeline = await rettiwt.user.timeline(userDetails.id, 10);
-      const allTweets = (timeline?.list || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      const data = await res.json();
+      const allTweets = data.tweets || [];
 
       console.error(`  @${account.handle}: ${allTweets.length} tweets fetched`);
 
-      // Debug: print dates of fetched tweets
-      if (allTweets.length > 0) {
-        const dates = allTweets.slice(0, 3).map(t => t.createdAt).join(', ');
-        console.error(`    Latest tweet dates: ${dates}`);
-      }
-
+      // TwitterAPI.io 返回按时间排序的推文（最新在前）
       const newTweets = [];
       for (const tweet of allTweets) {
         if (newTweets.length >= MAX_TWEETS_PER_USER) break;
 
         const tweetDate = new Date(tweet.createdAt);
-        if (tweetDate < cutoff) continue;
+        if (tweetDate < cutoff) break; // 已按时间排序，后面的更旧，直接跳出
+
         if (state.seenTweets[tweet.id]) continue;
-        if ((tweet.fullText || tweet.text || '').startsWith('RT @')) continue;
+        if (tweet.isReply) continue; // 跳过回复
+        if ((tweet.text || '').startsWith('RT @')) continue; // 跳过转推
 
         newTweets.push({
           id: tweet.id,
-          text: tweet.fullText || tweet.text || '',
+          text: tweet.text || '',
           createdAt: tweet.createdAt,
-          url: `https://x.com/${account.handle}/status/${tweet.id}`,
+          url: tweet.url || `https://x.com/${account.handle}/status/${tweet.id}`,
           likes: tweet.likeCount || 0,
           retweets: tweet.retweetCount || 0,
           replies: tweet.replyCount || 0,
@@ -97,15 +111,18 @@ async function fetchXContent(xAccounts, state, errors) {
         tweets: newTweets
       });
 
-      await new Promise(r => setTimeout(r, 500));
+      // 控制请求频率
+      await new Promise(r => setTimeout(r, 200));
 
     } catch (err) {
-      errors.push(`Rettiwt: Error fetching @${account.handle}: ${err.message}`);
+      errors.push(`TwitterAPI.io: Error fetching @${account.handle}: ${err.message}`);
     }
   }
 
   return results;
 }
+
+// -- YouTube Fetching (Supadata API) -----------------------------------------
 
 async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
   const cutoff = new Date(Date.now() - PODCAST_LOOKBACK_HOURS * 60 * 60 * 1000);
@@ -122,7 +139,7 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
 
       const videosRes = await fetch(videosUrl, { headers: { 'x-api-key': apiKey } });
       if (!videosRes.ok) {
-        errors.push(`YouTube: Failed to fetch videos for ${podcast.name}: HTTP ${videosRes.status}`);
+        errors.push(`YouTube: Failed for ${podcast.name}: HTTP ${videosRes.status}`);
         continue;
       }
 
@@ -135,14 +152,18 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
           const metaRes = await fetch(`${SUPADATA_BASE}/youtube/video?id=${videoId}`, { headers: { 'x-api-key': apiKey } });
           if (!metaRes.ok) continue;
           const meta = await metaRes.json();
-          allCandidates.push({ podcast, videoId, title: meta.title || 'Untitled', publishedAt: meta.uploadDate || meta.publishedAt || meta.date || null });
+          allCandidates.push({
+            podcast, videoId,
+            title: meta.title || 'Untitled',
+            publishedAt: meta.uploadDate || meta.publishedAt || meta.date || null
+          });
           await new Promise(r => setTimeout(r, 300));
         } catch (err) {
-          errors.push(`YouTube: Error fetching metadata for ${videoId}: ${err.message}`);
+          errors.push(`YouTube: Error for ${videoId}: ${err.message}`);
         }
       }
     } catch (err) {
-      errors.push(`YouTube: Error processing ${podcast.name}: ${err.message}`);
+      errors.push(`YouTube: Error for ${podcast.name}: ${err.message}`);
     }
   }
 
@@ -160,7 +181,7 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
       { headers: { 'x-api-key': apiKey } }
     );
     if (!transcriptRes.ok) {
-      errors.push(`YouTube: Failed to get transcript: HTTP ${transcriptRes.status}`);
+      errors.push(`YouTube: Transcript failed: HTTP ${transcriptRes.status}`);
       return [];
     }
     const transcriptData = await transcriptRes.json();
@@ -175,32 +196,40 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
       transcript: transcriptData.content || ''
     }];
   } catch (err) {
-    errors.push(`YouTube: Error fetching transcript: ${err.message}`);
+    errors.push(`YouTube: Transcript error: ${err.message}`);
     return [];
   }
 }
 
+// -- Main --------------------------------------------------------------------
+
 async function main() {
+  const twitterApiKey = process.env.TWITTERAPI_IO_KEY;
   const supadataKey = process.env.SUPADATA_API_KEY;
+
   if (!supadataKey) { console.error('SUPADATA_API_KEY not set'); process.exit(1); }
+  if (!twitterApiKey) { console.error('TWITTERAPI_IO_KEY not set'); process.exit(1); }
 
   const sources = await loadSources();
   const state = await loadState();
   const errors = [];
 
-  console.error('Fetching X/Twitter content via Rettiwt (guest mode)...');
-  const xContent = await fetchXContent(sources.x_accounts, state, errors);
-  console.error(`  Found ${xContent.length} builders with new tweets`);
-
+  // 抓推文
+  console.error('Fetching X/Twitter content via TwitterAPI.io...');
+  const xContent = await fetchXContent(sources.x_accounts, twitterApiKey, state, errors);
   const totalTweets = xContent.reduce((sum, a) => sum + a.tweets.length, 0);
+  console.error(`  Found ${xContent.length} builders with ${totalTweets} new tweets`);
+
   await writeFile(join(SCRIPT_DIR, '..', 'feed-x.json'), JSON.stringify({
     generatedAt: new Date().toISOString(),
     lookbackHours: TWEET_LOOKBACK_HOURS,
     x: xContent,
     stats: { xBuilders: xContent.length, totalTweets },
-    errors: errors.filter(e => e.startsWith('Rettiwt')).length > 0 ? errors.filter(e => e.startsWith('Rettiwt')) : undefined
+    errors: errors.filter(e => e.startsWith('TwitterAPI')).length > 0
+      ? errors.filter(e => e.startsWith('TwitterAPI')) : undefined
   }, null, 2));
 
+  // 抓播客
   console.error('Fetching YouTube content...');
   const podcasts = await fetchYouTubeContent(sources.podcasts, supadataKey, state, errors);
   console.error(`  Found ${podcasts.length} new episodes`);
@@ -210,7 +239,8 @@ async function main() {
     lookbackHours: PODCAST_LOOKBACK_HOURS,
     podcasts,
     stats: { podcastEpisodes: podcasts.length },
-    errors: errors.filter(e => e.startsWith('YouTube')).length > 0 ? errors.filter(e => e.startsWith('YouTube')) : undefined
+    errors: errors.filter(e => e.startsWith('YouTube')).length > 0
+      ? errors.filter(e => e.startsWith('YouTube')) : undefined
   }, null, 2));
 
   await saveState(state);
