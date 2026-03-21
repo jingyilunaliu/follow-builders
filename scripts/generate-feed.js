@@ -16,6 +16,18 @@ const MAX_TWEETS_PER_USER = 3;
 const SCRIPT_DIR = decodeURIComponent(new URL('.', import.meta.url).pathname);
 const STATE_PATH = join(SCRIPT_DIR, '..', 'state-feed.json');
 
+// 带超时的 fetch 封装
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function loadState() {
   if (!existsSync(STATE_PATH)) return { seenTweets: {}, seenVideos: {} };
   try { return JSON.parse(await readFile(STATE_PATH, 'utf-8')); }
@@ -42,10 +54,7 @@ async function fetchXContent(xAccounts, apiKey, state, errors) {
 
   for (const account of xAccounts) {
     try {
-      const res = await fetch(
-        `${TWITTERAPI_BASE}/twitter/user/last_tweets?userName=${account.handle}&includeReplies=false`,
-        { headers: { 'X-API-Key': apiKey } }
-      );
+      const res = await fetchWithTimeout(`${TWITTERAPI_BASE}/twitter/user/last_tweets?userName=${account.handle}&includeReplies=false`, { headers: { 'X-API-Key': apiKey } });
 
       if (res.status === 429) {
         console.error(`  @${account.handle}: 速率限制，等待 10 秒...`);
@@ -106,14 +115,14 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
         ? `${SUPADATA_BASE}/youtube/playlist/videos?id=${podcast.playlistId}`
         : `${SUPADATA_BASE}/youtube/channel/videos?id=${podcast.channelHandle}&type=video`;
 
-      const videosRes = await fetch(videosUrl, { headers: { 'x-api-key': apiKey } });
+      const videosRes = await fetchWithTimeout(videosUrl, { headers: { 'x-api-key': apiKey } });
       if (!videosRes.ok) { errors.push(`YouTube: ${podcast.name} HTTP ${videosRes.status}`); continue; }
 
       const videoIds = (await videosRes.json()).videoIds || [];
       for (const videoId of videoIds.slice(0, 3)) {
         if (state.seenVideos[videoId]) continue;
         try {
-          const metaRes = await fetch(`${SUPADATA_BASE}/youtube/video?id=${videoId}`, { headers: { 'x-api-key': apiKey } });
+          const metaRes = await fetchWithTimeout(`${SUPADATA_BASE}/youtube/video?id=${videoId}`, { headers: { 'x-api-key': apiKey } });
           if (!metaRes.ok) continue;
           const meta = await metaRes.json();
           const publishedAt = meta.uploadDate || meta.publishedAt || meta.date || null;
@@ -134,7 +143,7 @@ async function fetchYouTubeContent(podcasts, apiKey, state, errors) {
   for (const candidate of withinWindow) {
     if (state.seenVideos[candidate.videoId]) continue;
     try {
-      const transcriptRes = await fetch(
+      const transcriptRes = await fetchWithTimeout(
         `${SUPADATA_BASE}/youtube/transcript?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${candidate.videoId}`)}&text=true`,
         { headers: { 'x-api-key': apiKey } }
       );
