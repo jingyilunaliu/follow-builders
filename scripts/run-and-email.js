@@ -89,17 +89,18 @@ async function generateChineseDigest(xFeed, podcastFeed) {
   const prompt = `你是一个专注于 AI、3D 生成、空间计算领域的投资人助手。
 请基于以下内容，用中文生成每日摘要。
 
-格式要求：
+重要规则：
+- 每条推文摘要后面必须附上原文链接，格式：[原文](URL)
+- 只总结有实质内容的推文，没有内容的人直接跳过
+
+格式：
 ## 🤖 twitter daily · ${today}
 
 ### 🔥 今日重点
-（2-3 条最值得关注的动态，说明为什么重要）
+（2-3 条最值得关注的动态，说明为什么重要，附链接）
 
 ### 🐦 X 动态
-（按人物分组，每人 1-2 句，没有实质内容的直接跳过）
-
-### 🎙️ 播客
-（如有新播客，一句话总结主题；无则跳过此节）
+（按人物分组，**姓名 @handle**：一句话摘要 [原文](URL)）
 
 ### 💡 投资信号
 （从 3D 生成、空间智能、AI infra 角度提炼 1-2 个值得关注的信号）
@@ -127,7 +128,9 @@ ${contentBlock}`;
   }
 
   const data = await res.json();
-  return data.candidates[0].content.parts[0].text;
+  const digestText = data.candidates[0].content.parts[0].text;
+  console.log("=== Gemini 输出 ===\n" + digestText + "\n=== 输出结束 ===");
+  return digestText;
 }
 
 // ─── 发送邮件 ──────────────────────────────────────────────────────
@@ -137,37 +140,19 @@ async function sendEmail(digestMarkdown) {
     month: 'long', day: 'numeric'
   });
 
-  // Markdown → HTML（逐行转换，避免截断）
-  const lines = digestMarkdown.split('\n');
-  const htmlLines = [];
-  let inPara = false;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('## ')) {
-      if (inPara) { htmlLines.push('</p>'); inPara = false; }
-      htmlLines.push(`<h2>${trimmed.slice(3)}</h2>`);
-    } else if (trimmed.startsWith('### ')) {
-      if (inPara) { htmlLines.push('</p>'); inPara = false; }
-      htmlLines.push(`<h3>${trimmed.slice(4)}</h3>`);
-    } else if (trimmed === '---') {
-      if (inPara) { htmlLines.push('</p>'); inPara = false; }
-      htmlLines.push('<hr>');
-    } else if (trimmed === '') {
-      if (inPara) { htmlLines.push('</p>'); inPara = false; }
-    } else {
-      // 行内格式
-      let html = trimmed
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2">$1</a>')
-        .replace(/https?:\/\/\S+/g, url => `<a href="${url}">${url}</a>`);
-      if (!inPara) { htmlLines.push('<p>'); inPara = true; }
-      htmlLines.push(html + '<br>');
-    }
-  }
-  if (inPara) htmlLines.push('</p>');
-  const body = htmlLines.join('\n');
+  // Markdown → HTML
+  const body = digestMarkdown
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" style="color:#0066cc">$1</a>')
+    .replace(/^## (.+)$/gm, '<h2 style="border-bottom:2px solid #f0f0f0;padding-bottom:8px">$1</h2>')
+    .replace(/^### (.+)$/gm, '<h3 style="color:#444;margin-top:24px">$1</h3>')
+    .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #eee">')
+    .replace(/\n\n/g, '</p><p style="line-height:1.75">')
+    .replace(/\n/g, '<br>');
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
