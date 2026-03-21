@@ -34,4 +34,5 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TWITTERAPI_IO_KEY: ${{ secrets.TWITTERAPI_IO_KEY }}
         run: node scripts/run-and-email.js
