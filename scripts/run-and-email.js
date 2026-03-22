@@ -116,7 +116,7 @@ ${contentBlock}`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 2000 }
+        generationConfig: { maxOutputTokens: 8000 }
       })
     }
   );
@@ -141,18 +141,47 @@ async function sendEmail(digestMarkdown) {
   });
 
   // Markdown → HTML
-  const body = digestMarkdown
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" style="color:#0066cc">$1</a>')
-    .replace(/^## (.+)$/gm, '<h2 style="border-bottom:2px solid #f0f0f0;padding-bottom:8px">$1</h2>')
-    .replace(/^### (.+)$/gm, '<h3 style="color:#444;margin-top:24px">$1</h3>')
-    .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #eee">')
-    .replace(/\n\n/g, '</p><p style="line-height:1.75">')
-    .replace(/\n/g, '<br>');
+  function mdToHtml(md) {
+    // 1. 先提取链接，用占位符替换
+    const links = [];
+    let s = md.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, text, url) => {
+      links.push({ text, url });
+      return `%%LINK${links.length - 1}%%`;
+    });
+    // 2. 转义 HTML 特殊字符（防止推文内容破坏结构）
+    s = s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // 3. 处理标题和结构
+    s = s.replace(/^## (.+)$/gm, '§H2§$1§/H2§');
+    s = s.replace(/^### (.+)$/gm, '§H3§$1§/H3§');
+    s = s.replace(/^---$/gm, '§HR§');
+    // 4. 粗体斜体
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // 5. 还原链接
+    s = s.replace(/%%LINK(\d+)%%/g, (_, i) => {
+      const { text, url } = links[parseInt(i)];
+      return `<a href="${url}" style="color:#0066cc">${text}</a>`;
+    });
+    // 6. 段落和换行
+    const lines = s.split('\n');
+    let html = '';
+    for (const line of lines) {
+      if (line.startsWith('§H2§')) {
+        html += `<h2 style="border-bottom:2px solid #f0f0f0;padding-bottom:8px;margin-top:24px">${line.slice(4, -5)}</h2>\n`;
+      } else if (line.startsWith('§H3§')) {
+        html += `<h3 style="color:#444;margin-top:20px">${line.slice(4, -5)}</h3>\n`;
+      } else if (line === '§HR§') {
+        html += `<hr style="border:none;border-top:1px solid #eee;margin:16px 0">\n`;
+      } else if (line.trim() === '') {
+        html += '<br>\n';
+      } else {
+        html += `<p style="line-height:1.75;margin:4px 0">${line}</p>\n`;
+      }
+    }
+    return html;
+  }
+  const body = mdToHtml(digestMarkdown);
 
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
