@@ -102,8 +102,20 @@ async function generateChineseDigest(xFeed, podcastFeed) {
 ### 🐦 X 动态
 （按人物分组，**姓名 @handle**：一句话摘要 [原文](URL)）
 
-### 💡 投资信号
-（从 3D 生成、空间智能、AI infra 角度提炼 1-2 个值得关注的信号）
+### 🔁 今日转发文案
+从今日推文中，选出一条最值得转发的空间计算或世界模型相关帖子，写一段转发评论文案。
+
+风格要求（严格遵守）：
+- 英文
+- 极简，一句话为佳，最多两句
+- 聚焦技术问题本身，不加"this is important"之类的评价
+- 自然口语化，不要像新闻稿
+- 参考示例风格：「seamlessly blending digital and physical — where AI handles occlusion, lighting, and surface understanding in real time, making mixed reality experiences made easy」
+
+格式：
+> 原文作者：@handle
+> 原文链接：[原文](URL)
+> 转发文案：（你的文案）
 
 ---
 ${contentBlock}`;
