@@ -136,7 +136,7 @@ ${contentBlock}`;
   if (!res.ok) {
     const err = await res.text();
     console.error('Gemini 失败:', err);
-    return '<p>摘要生成失败，请检查 GEMINI_API_KEY。</p>';
+    return '摘要生成失败，请检查 GEMINI_API_KEY。';
   }
 
   const data = await res.json();
