@@ -133,6 +133,21 @@ ${contentBlock}`;
     }
   );
 
+  if (res.status === 503) {
+    console.error('Gemini 503，等待 10 秒后重试...');
+    await new Promise(r => setTimeout(r, 10000));
+    const retry = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 8000 } }) }
+    );
+    if (!retry.ok) {
+      console.error('Gemini 重试失败:', await retry.text());
+      return '摘要生成失败，请检查 GEMINI_API_KEY。';
+    }
+    const retryData = await retry.json();
+    return retryData.candidates[0].content.parts[0].text;
+  }
   if (!res.ok) {
     const err = await res.text();
     console.error('Gemini 失败:', err);
