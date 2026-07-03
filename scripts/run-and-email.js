@@ -22,10 +22,9 @@ const ROOT = join(__dirname, '..');
 async function main() {
   console.log('🚀 开始抓取内容...');
 
-  // 1. 运行 generate-feed.js，stdio: inherit 让所有输出直接显示在 Actions log
   const feedResult = spawnSync('node', ['generate-feed.js'], {
     cwd: __dirname,
-    stdio: 'inherit',       // ← 关键：stderr 和 stdout 都直接流出来
+    stdio: 'inherit',
     env: { ...process.env }
   });
 
@@ -33,7 +32,6 @@ async function main() {
     console.warn(`⚠️  generate-feed.js 退出码: ${feedResult.status}，继续尝试读取已有 feed 文件`);
   }
 
-  // 2. 读取 feed 文件
   let xFeed = { x: [], stats: {} };
   let podcastFeed = { podcasts: [], stats: {} };
 
@@ -56,10 +54,44 @@ async function main() {
     console.log('⚠️  未找到 feed-podcasts.json');
   }
 
-  // 3. 生成摘要并发邮件
   const digest = await generateChineseDigest(xFeed, podcastFeed);
   await sendEmail(digest);
   console.log('✅ 摘要已发送到邮箱');
+}
+
+// ─── 安全提取 Gemini 返回文本（核心修复） ──────────────────────────
+function extractGeminiText(data) {
+  const candidate = data?.candidates?.[0];
+  if (!candidate) {
+    console.error('⚠️ Gemini 返回中没有 candidates:', JSON.stringify(data).slice(0, 500));
+    return null;
+  }
+  const finishReason = candidate.finishReason;
+  if (finishReason && finishReason !== 'STOP') {
+    console.error(`⚠️ Gemini finishReason 异常: ${finishReason}`);
+  }
+  const text = candidate.content?.parts?.[0]?.text;
+  if (!text) {
+    console.error('⚠️ Gemini candidate 中没有 text:', JSON.stringify(candidate).slice(0, 500));
+    return null;
+  }
+  return text;
+}
+
+// ─── 封装一次 Gemini 请求 ───────────────────────────────────────────
+async function callGemini(prompt, apiKey) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 8000 }
+      })
+    }
+  );
+  return res;
 }
 
 // ─── Gemini 生成中文摘要 ───────────────────────────────────────────
@@ -121,41 +153,29 @@ async function generateChineseDigest(xFeed, podcastFeed) {
 ${contentBlock}`;
 
   const apiKey = process.env.GEMINI_API_KEY || '';
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 8000 }
-      })
-    }
-  );
+  const FALLBACK = '摘要生成失败，请检查 GEMINI_API_KEY 或 Gemini 返回内容（可能被安全过滤器拦截、配额限制或token超限）。';
+
+  let res = await callGemini(prompt, apiKey);
 
   if (res.status === 503) {
     console.error('Gemini 503，等待 10 秒后重试...');
     await new Promise(r => setTimeout(r, 10000));
-    const retry = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 8000 } }) }
-    );
-    if (!retry.ok) {
-      console.error('Gemini 重试失败:', await retry.text());
-      return '摘要生成失败，请检查 GEMINI_API_KEY。';
-    }
-    const retryData = await retry.json();
-    return retryData.candidates[0].content.parts[0].text;
+    res = await callGemini(prompt, apiKey);
   }
+
   if (!res.ok) {
     const err = await res.text();
     console.error('Gemini 失败:', err);
-    return '摘要生成失败，请检查 GEMINI_API_KEY。';
+    return FALLBACK;
   }
 
   const data = await res.json();
-  const digestText = data.candidates[0].content.parts[0].text;
+  const digestText = extractGeminiText(data);
+
+  if (!digestText) {
+    return FALLBACK;
+  }
+
   console.log("=== Gemini 输出 ===\n" + digestText + "\n=== 输出结束 ===");
   return digestText;
 }
@@ -167,30 +187,23 @@ async function sendEmail(digestMarkdown) {
     month: 'long', day: 'numeric'
   });
 
-  // Markdown → HTML
   function mdToHtml(md) {
-    // 1. 先提取链接，用占位符替换
     const links = [];
     let s = md.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, text, url) => {
       links.push({ text, url });
       return `%%LINK${links.length - 1}%%`;
     });
-    // 2. 转义 HTML 特殊字符（防止推文内容破坏结构）
     s = s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
     s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // 3. 处理标题和结构
     s = s.replace(/^## (.+)$/gm, '§H2§$1§/H2§');
     s = s.replace(/^### (.+)$/gm, '§H3§$1§/H3§');
     s = s.replace(/^---$/gm, '§HR§');
-    // 4. 粗体斜体
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    // 5. 还原链接
     s = s.replace(/%%LINK(\d+)%%/g, (_, i) => {
       const { text, url } = links[parseInt(i)];
       return `<a href="${url}" style="color:#0066cc">${text}</a>`;
     });
-    // 6. 段落和换行
     const lines = s.split('\n');
     let html = '';
     for (const line of lines) {
